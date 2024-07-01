@@ -56,32 +56,32 @@ Before synthesizing the CloudFormation, make sure getting a Debezium source conn
    (a) Download the MySQL connector plugin for the latest stable release from the [Debezium](https://debezium.io/releases/) site.<br/>
    (b) Download and extract the [AWS Secrets Manager Config Provider](https://www.confluent.io/hub/jcustenborder/kafka-config-provider-aws).<br/>
    (c) After completing steps (a), (b) above, you may have the following archives:
-      - `debezium-connector-mysql-2.4.0.Final-plugin.tar.gz`: Debezim MySQL Connector
+      - `debezium-connector-postgres-2.7.0.Final-plugin.tar.gz`: Debezium PostgreSQL Connector
       - `jcustenborder-kafka-config-provider-aws-0.1.2.zip`: AWS Secrets Manager Config Provider
 
     Place the archives into the same directory and
     compress the directory that you created in the previous step into a ZIP file and then upload the ZIP file to an S3 bucket.<br/>
     For example, you can do it like this:
     ```
-    $ mkdir -p debezium-connector-mysql
-    $ tar -xzf debezium-connector-mysql-2.4.0.Final-plugin.tar.gz -C debezium-connector-mysql
-    $ unzip jcustenborder-kafka-config-provider-aws-0.1.2.zip -d debezium-connector-mysql
-    $ cd debezium-connector-mysql/jcustenborder-kafka-config-provider-aws-0.1.2/lib
+    $ mkdir -p debezium-connector-postgresql
+    $ tar -xzf debezium-connector-postgres-2.7.0.Final-plugin.tar.gz -C debezium-connector-postgresql
+    $ unzip jcustenborder-kafka-config-provider-aws-0.1.2.zip -d debezium-connector-postgresql
+    $ cd debezium-connector-postgresql/jcustenborder-kafka-config-provider-aws-0.1.2/lib
     $ wget https://repo1.maven.org/maven2/com/google/guava/guava/31.1-jre/guava-31.1-jre.jar
     $ cd ../../
-    $ zip -9 -r ../debezium-connector-mysql-v2.4.0.zip *
+    $ zip -9 -r ../debezium-connector-postgresql-v2.7.0.zip *
     $ cd ..
-    $ aws s3 cp debezium-connector-mysql-v2.4.0.zip s3://my-bucket/path/
+    $ aws s3 cp debezium-connector-postgresql-v2.7.0.zip s3://my-bucket/path/
     ```
    (d) Copy the following JSON and paste it in a file. For example, `debezium-source-custom-plugin.json`.<br/>
     ```json
     {
-      "name": "debezium-connector-mysql-v2-4-0",
+      "name": "debezium-connector-postgresql-v2.7.0",
       "contentType": "ZIP",
       "location": {
           "s3Location": {
             "bucketArn": "arn:aws:s3:::<my-bucket>",
-            "fileKey": "<path>/debezium-connector-mysql-v2.4.0.zip"
+            "fileKey": "<path>/debezium-connector-postgresql-v2.7.0.zip"
         }
       }
     }
@@ -276,17 +276,8 @@ Create a bastion host to access the Aurora MySQL cluster
    <pre>
     $ BASTION_HOST_ID=$(aws cloudformation describe-stacks --stack-name <i>BastionHost</i> | jq -r '.Stacks[0].Outputs | .[] | select(.OutputKey | endswith("EC2InstanceId")) | .OutputValue')
     $ mssh -r <i>us-east-1</i> ec2-user@${BASTION_HOST_ID}
-    [ec2-user@ip-172-31-7-186 ~]$ mysql -h<i>db-cluster-name</i>.cluster-<i>xxxxxxxxxxxx</i>.<i>region-name</i>.rds.amazonaws.com -uadmin -p
-    Enter password:
-    Welcome to the MariaDB monitor.  Commands end with ; or \g.
-    Your MySQL connection id is 20
-    Server version: 8.0.23 Source distribution
-
-    Copyright (c) 2000, 2018, Oracle, MariaDB Corporation Ab and others.
-
-    Type 'help;' or '\h' for help. Type '\c' to clear the current input statement.
-
-    MySQL [(none)]>
+    [ec2-user@ip-172-31-7-186 ~]$ psql -h <i>db-cluster-name</i>.cluster-<i>xxxxxxxxxxxx</i>.<i>region-name</i>.rds.amazonaws.com -U clusteradmin -d testdb
+    [...]
    </pre>
 
    > :information_source: `BastionHost` is a CDK Stack to create the bastion host.
@@ -301,19 +292,30 @@ Create a bastion host to access the Aurora MySQL cluster
 
 2. At SQL prompt run the below command to confirm that binary logging is enabled:
    <pre>
-    MySQL [(none)]> SHOW GLOBAL VARIABLES LIKE "log_bin";
-    +---------------+-------+
-    | Variable_name | Value |
-    +---------------+-------+
-    | log_bin       | ON    |
-    +---------------+-------+
-    1 row in set (0.00 sec)
-   </pre>
-
-3. Also run this to AWS DMS has bin log access that is required for replication
-   <pre>
-    MySQL [(none)]> CALL mysql.rds_set_configuration('binlog retention hours', 24);
-    Query OK, 0 rows affected (0.01 sec)
+   testdb=> \x
+   Expanded display is on.
+   testdb=> select * from pg_stat_replication;
+   -[ RECORD 1 ]----+------------------------------
+   pid              | 9441
+   usesysid         | 16400
+   usename          | clusteradmin
+   application_name | Debezium Streaming
+   client_addr      | 10.0.84.62
+   client_hostname  |
+   client_port      | 47320
+   backend_start    | 2024-07-01 08:46:57.479859+00
+   backend_xmin     |
+   state            | streaming
+   sent_lsn         | 0/C4A6A98
+   write_lsn        | 0/C4A6768
+   flush_lsn        | 0/C487310
+   replay_lsn       | 0/C487310
+   write_lag        | 00:00:03.6201
+   flush_lag        | 00:09:16.626201
+   replay_lag       | 00:09:16.626201
+   sync_priority    | 0
+   sync_state       | async
+   reply_time       | 1999-12-21 01:07:45.212964+00
    </pre>
 
 ## (Step 5) Create a sample database and table
@@ -341,18 +343,17 @@ Create a bastion host to access the Aurora MySQL cluster
    </pre>
 2. Also run this to create the sample table named `retail_trans`
    <pre>
-    MySQL [testdb]> CREATE TABLE IF NOT EXISTS testdb.retail_trans (
-             trans_id BIGINT(20) AUTO_INCREMENT,
-             customer_id VARCHAR(12) NOT NULL,
-             event VARCHAR(10) DEFAULT NULL,
-             sku VARCHAR(10) NOT NULL,
-             amount INT DEFAULT 0,
-             device VARCHAR(10) DEFAULT NULL,
-             trans_datetime DATETIME DEFAULT CURRENT_TIMESTAMP,
-             PRIMARY KEY(trans_id),
-             KEY(trans_datetime)
-           ) ENGINE=InnoDB AUTO_INCREMENT=0;
-    Query OK, 0 rows affected, 1 warning (0.04 sec)
+    psql# 
+     CREATE TABLE IF NOT EXISTS retail_trans (
+               trans_id BIGSERIAL,
+               customer_id VARCHAR(12) NOT NULL,
+               event VARCHAR(10) DEFAULT NULL,
+               sku VARCHAR(10) NOT NULL,
+               amount INT DEFAULT 0,
+               device VARCHAR(10) DEFAULT NULL,
+               trans_datetime TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+               PRIMARY KEY(trans_id)
+     )
 
     MySQL [testdb]> SHOW TABLES;
     +------------------+
@@ -420,12 +421,13 @@ Create a Kinesis Data Firehose to deliver CDC coming from MSK to S3
     > boto3
     > dataset==1.5.2
     > Faker==13.3.1
-    > PyMySQL==1.0.2
+    > psycopg2-binary==2.9.9
     > EOF
     [ec2-user@ip-172-31-7-186 ~]$ pip install -U -r requirements-dev.txt
     [ec2-user@ip-172-31-7-186 ~]$ python3 gen_fake_mysql_data.py \
                    --database <i>your-database-name</i> \
                    --table <i>your-table-name</i> \
+                   --region-name $(ec2-metadata --availability-zone | awk '{print $NF}' | sed "s#\(.*\).#\1#") \
                    --user <i>user-name</i> \
                    --password <i>password</i> \
                    --host <i>db-cluster-name</i>.cluster-<i>xxxxxxxxxxxx</i>.<i>region-name</i>.rds.amazonaws.com \

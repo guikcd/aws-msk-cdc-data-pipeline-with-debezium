@@ -107,6 +107,7 @@ yum update -y
 yum install -y python3.7
 yum install -y jq
 yum install -y mysql
+amazon-linux-extras install postgresql14
 
 cd /home/ec2-user
 wget https://bootstrap.pypa.io/get-pip.py

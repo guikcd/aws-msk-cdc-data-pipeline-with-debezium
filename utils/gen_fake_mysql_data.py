@@ -12,29 +12,29 @@ import time
 
 import boto3
 from faker import Faker
-import pymysql
+import psycopg2
 import dataset
 
 Faker.seed(47)
 
 CREATE_TABLE_SQL_FMT = '''
-CREATE TABLE IF NOT EXISTS {database}.{table} (
-  trans_id BIGINT(20) AUTO_INCREMENT PRIMARY KEY,
-  customer_id VARCHAR(12) NOT NULL,
-  event VARCHAR(10) DEFAULT NULL,
-  sku VARCHAR(10) NOT NULL,
-  amount INT DEFAULT 0,
-  device VARCHAR(10) DEFAULT NULL,
-  trans_datetime DATETIME DEFAULT CURRENT_TIMESTAMP,
-  KEY(trans_datetime)
-) ENGINE=InnoDB AUTO_INCREMENT=0;
+CREATE TABLE IF NOT EXISTS retail_trans (
+          trans_id BIGSERIAL,
+          customer_id VARCHAR(12) NOT NULL,
+          event VARCHAR(10) DEFAULT NULL,
+          sku VARCHAR(10) NOT NULL,
+          amount INT DEFAULT 0,
+          device VARCHAR(10) DEFAULT NULL,
+          trans_datetime TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY(trans_id)
+)
 '''
 
-DROP_TABLE_SQL_FMT = '''DROP TABLE IF NOT EXISTS {database}.{table};'''
+DROP_TABLE_SQL_FMT = '''DROP TABLE IF EXISTS {table};'''
 
-INSERT_SQL_FMT = '''INSERT INTO {database}.{table} (customer_id, event, sku, amount, device, trans_datetime) VALUES("{customer_id}", "{event}", "{sku}", {amount}, "{device}", "{trans_datetime}");'''
+INSERT_SQL_FMT = '''INSERT INTO {table} (customer_id, event, sku, amount, device, trans_datetime) VALUES('{customer_id}', '{event}', '{sku}', {amount}, '{device}', '{trans_datetime}');'''
 
-DB_URL_FMT = 'mysql+pymysql://{user}:{password}@{host}?autocommit=True'
+DB_URL_FMT = 'postgresql://{user}:{password}@{host}/{database}'
 
 def main():
   parser = argparse.ArgumentParser()
@@ -57,7 +57,7 @@ def main():
 
   fake = Faker()
 
-  db_url = DB_URL_FMT.format(user=options.user, password=options.password, host=options.host)
+  db_url = DB_URL_FMT.format(user=options.user, password=options.password, host=options.host, database=options.database)
   if not options.dry_run:
     db = dataset.connect(db_url)
 
@@ -65,14 +65,18 @@ def main():
     sql_stmt = CREATE_TABLE_SQL_FMT.format(database=options.database, table=options.table)
     print(sql_stmt)
     if not options.dry_run:
+      db.begin()
       db.query(sql_stmt)
+      db.commit()
     return
 
   if options.drop_table:
     sql_stmt = DROP_TABLE_SQL_FMT.format(database=options.database, table=options.table)
     print(sql_stmt)
     if not options.dry_run:
+      db.begin()
       db.query(sql_stmt)
+      db.commit()
     return
 
   START_DATETIME = datetime.datetime.utcnow().replace(minute=0, second=0, microsecond=0)
@@ -94,7 +98,9 @@ def main():
     if options.dry_run:
       print(sql_stmt, file=sys.stderr)
     else:
+      db.begin()
       db.query(sql_stmt)
+      db.commit()
 
       if (cnt + 1) % 100 == 0:
         print(sql_stmt)

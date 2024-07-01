@@ -175,15 +175,15 @@ class KafkaConnectorStack(Stack):
         )
       ),
       connector_configuration={
-        "connector.class": "io.debezium.connector.mysql.MySqlConnector",
+        "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
         "tasks.max": msk_connector_configuration['tasks.max'],
 
         "database.hostname": db_hostname,
-        "database.port": "3306",
+        "database.port": "5432",
         "database.user": f"${{secretManager:{rds_secret_name}:username}}",
         "database.password": f"${{secretManager:{rds_secret_name}:password}}",
         "database.server.id": "123456", # database.server.id shoud be given
-        "database.include.list": msk_connector_configuration['database.include.list'],
+        "database.dbname": msk_connector_configuration['database.include.list'], # include-list in MySQL
 
         "topic.prefix": msk_connector_configuration['topic.prefix'],
         "topic.creation.enable": "true",
@@ -202,6 +202,7 @@ class KafkaConnectorStack(Stack):
         "schema.history.internal.producer.sasl.mechanism": "AWS_MSK_IAM",
         "schema.history.internal.producer.sasl.jaas.config": "software.amazon.msk.auth.iam.IAMLoginModule required;",
         "schema.history.internal.producer.sasl.client.callback.handler.class": "software.amazon.msk.auth.iam.IAMClientCallbackHandler",
+        "plugin.name": "pgoutput", # to avoid "io.debezium.DebeziumException: Creation of replication slot failed, Caused by: org.postgresql.util.PSQLException: ERROR: could not access file "decoderbufs": No such file or directory", https://debezium.io/documentation/reference/stable/connectors/postgresql.html#postgresql-on-amazon-rds
       },
       connector_name=msk_connector_name,
       kafka_cluster=aws_kafkaconnect.CfnConnector.KafkaClusterProperty(
@@ -219,7 +220,7 @@ class KafkaConnectorStack(Stack):
       kafka_cluster_encryption_in_transit=aws_kafkaconnect.CfnConnector.KafkaClusterEncryptionInTransitProperty(
         encryption_type="TLS"
       ),
-      kafka_connect_version="2.7.1",
+        kafka_connect_version="2.7.1", # Invalid parameter kafkaConnectVersion: Unsupported KafkaConnectVersion [3.5.1]. Valid values: [2.7.1]
       plugins=[aws_kafkaconnect.CfnConnector.PluginProperty(
         custom_plugin=aws_kafkaconnect.CfnConnector.CustomPluginProperty(
           custom_plugin_arn=msk_connector_custom_plugin['custom_plugin_arn'],

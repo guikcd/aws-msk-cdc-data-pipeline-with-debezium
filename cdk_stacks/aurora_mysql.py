@@ -37,7 +37,7 @@ class AuroraMysqlStack(Stack):
       description='security group for mysql',
       security_group_name=f'aurora-mysql-server-sg-{db_cluster_name}'
     )
-    sg_mysql_server.add_ingress_rule(peer=self.sg_mysql_client, connection=aws_ec2.Port.tcp(3306),
+    sg_mysql_server.add_ingress_rule(peer=self.sg_mysql_client, connection=aws_ec2.Port.tcp(5432),
       description='aurora-mysql-client-sg')
     sg_mysql_server.add_ingress_rule(peer=sg_mysql_server, connection=aws_ec2.Port.all_tcp(),
       description='aurora-mysql-server-sg')
@@ -50,37 +50,13 @@ class AuroraMysqlStack(Stack):
       vpc=vpc
     )
 
-    rds_engine = aws_rds.DatabaseClusterEngine.aurora_mysql(version=aws_rds.AuroraMysqlEngineVersion.VER_3_04_0)
+    rds_engine = aws_rds.DatabaseClusterEngine.aurora_postgres(version=aws_rds.AuroraPostgresEngineVersion.VER_15_5)
 
-    #XXX: https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraMySQL.Reference.html#AuroraMySQL.Reference.Parameters.Cluster
-    rds_cluster_param_group = aws_rds.ParameterGroup(self, 'AuroraMySQLClusterParamGroup',
+    rds_cluster_param_group = aws_rds.ParameterGroup(self, 'AuroraPostgreSQLClusterParamGroup',
       engine=rds_engine,
-      description='Custom cluster parameter group for aurora-mysql8.x',
+      description='Custom cluster parameter group for pg',
       parameters={
-        # For Aurora MySQL version 3, Aurora always uses the default value of 1.
-        # 'innodb_flush_log_at_trx_commit': '2',
-        'slow_query_log': '1',
-        # Removed from Aurora MySQL version 3.
-        # 'tx_isolation': 'READ-COMMITTED',
-        'wait_timeout': '300',
-        'character-set-client-handshake': '0',
-        'character_set_server': 'utf8mb4',
-        'collation_server': 'utf8mb4_unicode_ci',
-        'init_connect': 'SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci',
-        'binlog_format': 'ROW'
-      }
-    )
-
-    #XXX: https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraMySQL.Reference.html#AuroraMySQL.Reference.Parameters.Instance
-    rds_db_param_group = aws_rds.ParameterGroup(self, 'AuroraMySQLDBParamGroup',
-      engine=rds_engine,
-      description='Custom parameter group for aurora-mysql8.x',
-      parameters={
-        'slow_query_log': '1',
-        # Removed from Aurora MySQL version 3.
-        # 'tx_isolation': 'READ-COMMITTED',
-        'wait_timeout': '300',
-        'init_connect': 'SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci'
+        'rds.logical_replication': '1'
       }
     )
 
@@ -90,7 +66,7 @@ class AuroraMysqlStack(Stack):
     # "All characters of the desired type have been excluded"
     db_secret = aws_secretsmanager.Secret(self, 'DatabaseSecret',
       generate_secret_string=aws_secretsmanager.SecretStringGenerator(
-        secret_string_template=json.dumps({"username": "admin"}),
+        secret_string_template=json.dumps({"username": "clusteradmin"}), # MasterUsername admin cannot be used as it is a reserved word used by the engine
         generate_string_key="password",
         exclude_punctuation=True,
         password_length=8
@@ -103,13 +79,11 @@ class AuroraMysqlStack(Stack):
       credentials=rds_credentials, # A username of 'admin' (or 'postgres' for PostgreSQL) and SecretsManager-generated password
       writer=aws_rds.ClusterInstance.provisioned("writer",
         instance_type=aws_ec2.InstanceType.of(aws_ec2.InstanceClass.BURSTABLE3, aws_ec2.InstanceSize.MEDIUM),
-        parameter_group=rds_db_param_group,
         auto_minor_version_upgrade=False,
       ),
       readers=[
         aws_rds.ClusterInstance.provisioned("reader",
           instance_type=aws_ec2.InstanceType.of(aws_ec2.InstanceClass.BURSTABLE3, aws_ec2.InstanceSize.MEDIUM),
-          parameter_group=rds_db_param_group,
           auto_minor_version_upgrade=False
         )
       ],
